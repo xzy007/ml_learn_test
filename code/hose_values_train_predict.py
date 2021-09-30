@@ -21,7 +21,10 @@ from sklearn.metrics import mean_squared_error
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.model_selection import cross_val_score
 from sklearn.ensemble import RandomForestRegressor
-
+from sklearn.model_selection import RandomizedSearchCV
+import joblib
+from sklearn.model_selection import GridSearchCV
+from scipy import stats
 pd.set_option('display.max_columns', None)
 
 local_path = "../data/housing/"
@@ -333,7 +336,105 @@ def train_data():
     print(tree_rmse_scores.std())
 # 第八步，微调模型参数
 def search_model_params():
-    pass
+    # 采样数据
+    housing = pd.read_csv("%s/housing.csv" % local_path)
+    housing["income_cat"] = pd.cut(housing["median_income"],
+                                   bins=[0.0, 1.5, 3.0, 4.5, 6.0, np.inf],
+                                   labels=[1, 2, 3, 4, 5])
+    split = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+    for train_index, test_index in split.split(housing, housing["income_cat"]):
+        strat_train_data = housing.loc[train_index]
+        strat_test_data = housing.loc[test_index]
+    train_data = strat_train_data.drop(["income_cat"], axis=1)
+
+    housing = train_data.drop("median_house_value", axis=1)
+    housing_label = train_data["median_house_value"].copy() #
+
+    #pip流操作
+    # 数值处理
+    num_pipeline = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("attribs_adder", CombinedAttributesAdder()),
+        ("std_scaler", StandardScaler())
+    ])
+    housing_num = housing.drop(["ocean_proximity"], axis=1)
+    housing_num_tr = num_pipeline.fit_transform(housing_num)
+    # print(housing_num_tr[:3])
+    #文字处理
+    num_attribs = list(housing_num)
+    cat_attribs = ["ocean_proximity"]
+    full_pipeline = ColumnTransformer([
+        ("num", num_pipeline, num_attribs),
+        ("cat", OneHotEncoder(), cat_attribs)
+    ]) #返回中存在稀疏比，是否满足阈值，满足可能返回稀疏矩阵
+    housing_prepared = full_pipeline.fit_transform(housing)
+    # print(housing_prepared[:3])
+
+    # 随机森林回归，依然过拟合
+    forest_reg = RandomForestRegressor()
+    # forest_reg.fit(housing_prepared, housing_label)
+    # housing_predict = forest_reg.predict(housing_prepared)
+    # forest_mse = mean_squared_error(housing_label, housing_predict)
+
+    param_grid = [{"n_estimators":[3, 10, 20], "max_features":[2, 4, 6, 8]},
+                  {"bootstrap":[False], "n_estimators":[3, 10], "max_features":[2, 3, 4]}]
+    # GridSearchCV
+    # grid_search = GridSearchCV(forest_reg, param_grid, cv=5,
+    #                            scoring="neg_mean_squared_error",
+    #                            return_train_score=True)
+    # RandomizedSearchCV
+    grid_search = RandomizedSearchCV(forest_reg, param_grid, cv=5,
+                               scoring="neg_mean_squared_error",
+                               return_train_score=True)
+
+
+    grid_search.fit(housing_prepared, housing_label)
+    print(grid_search.best_params_)
+    cvres = grid_search.cv_results_
+    for mean_score, params in zip(cvres["mean_test_score"], cvres["params"]):
+        print(np.sqrt(-mean_score), params)
+
+    # forest_reg = grid_search.best_estimator_
+    # housing_predict = forest_reg.predict(housing_prepared)
+    # forest_mse = mean_squared_error(housing_label, housing_predict)
+    # print(np.sqrt(forest_mse))
+    # # 保存模型
+    # joblib.dump(forest_reg, "%s/forest_reg_model.pkl" % local_path)
+    # # 加载模型
+    # forest_reg = joblib.load("%s/forest_reg_model.pkl" % local_path)
+    # housing_predict = forest_reg.predict(housing_prepared)
+    # forest_mse = mean_squared_error(housing_label, housing_predict)
+    # print(np.sqrt(forest_mse))
+
+    #分析最佳模型的，以及其误差
+    feature_importances = grid_search.best_estimator_.feature_importances_
+    cat_attribs = list(full_pipeline.named_transformers_["cat"].categories_[0])
+    attributes = num_attribs + ["rooms_per_hhold", "pop_per_hhold", "bedrooms_per_room"] + cat_attribs
+    importances = sorted(zip(feature_importances, attributes), reverse=True)
+    print(importances)
+
+    # 测试测试
+    X_test = strat_test_data.drop("median_house_value", axis=1)
+    Y_test = strat_test_data["median_house_value"]
+    X_test_prepare = full_pipeline.transform(X_test)
+    final_predict = grid_search.best_estimator_.predict(X_test_prepare)
+
+    final_mse = mean_squared_error(Y_test, final_predict)
+    print(np.sqrt(final_mse))
+
+    # 评估是否值的上线
+    confidence = 0.95
+    squared_error = (final_predict - Y_test) ** 2
+    confidence_lower_uper = np.sqrt(stats.t.interval(confidence, len(squared_error)-1,
+                                    loc=squared_error.mean(),
+                                    scale=stats.sem(squared_error)))
+    print(confidence_lower_uper) #评估模型的损失差异的置信区间范围
+
+    # 系统部署，包括模型部署，服务等等
+    # 系统层次监控并且给与告警：
+    # 1：防止系统组件有bug,或者组件出问题，导致模型效果下降，必须监控模型所影响的直接效果，观察是否有存在异常
+    # 2：模型保持新鲜度，观测离线评估差异是否过大，若是负向的，及时给与告警
+    # 3：注意备份操作，主要备份效果最佳的模型，包括数据集与模型参数等
 
 search_model_params()
 

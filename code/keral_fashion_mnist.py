@@ -2,20 +2,26 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+from sklearn.datasets import fetch_california_housing
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 from tensorflow.python.util import compat
 import os
+from tensorflow.python.keras import *
+from tensorflow.python import keras
 # keras一般通过tensorflow.keras来使用，但是pycharm没有提示，原因是因为实际的keras路径放在tensorflow/python/keras
-try:
-    from tensorflow.python import keras
-    from tensorflow.python.keras import layers
-    from tensorflow.python.keras import losses
-    from tensorflow.python.keras import optimizers
-    from tensorflow.python.keras import metrics
-    from tensorflow.python.keras import utils
-    from tensorflow.python.keras import backend as K
-except:
-    from tensorflow.keras import keras
-base_path = "../data/fashion_mnist_data" #
+# try:
+#     from tensorflow.python import keras
+#     from tensorflow.python.keras import layers
+#     from tensorflow.python.keras import losses
+#     from tensorflow.python.keras import optimizers
+#     from tensorflow.python.keras import metrics
+#     from tensorflow.python.keras import utils
+#     from tensorflow.python.keras import backend as K
+#     from tensorflow.python.keras import callbacks
+# except:
+#     from tensorflow.keras import keras
+base_path = "../data/housing" #
 
 # 下载fastion数据
 def load_mnist(path, kind='train'):
@@ -104,7 +110,7 @@ def create_model():
     # plt.show()
     # exit(0)
 
-    model = keras.models.Sequential([
+    model = models.Sequential([
         layers.Flatten(input_shape=[28, 28]),
         layers.Dense(300, activation='relu'),
         layers.Dense(100, activation='relu'),
@@ -203,7 +209,116 @@ def create_model_v1():
     eval = model2.evaluate(X_test, Y_test, batch_size=32)
     print(eval)
 
+class WideAndDeepModel(Model):
+    def __init__(self, units=30, activation='relu', **kwargs):
+        super().__init__(**kwargs)
+        self.hidden1 = layers.Dense(units, activation=activation)
+        self.hidden2 = layers.Dense(units, activation=activation)
+        self.main_out = layers.Dense(1)
+        self.aux_out = layers.Dense(1)
+    def call(self, inputs):
+        inputs_A, inputs_B = inputs
+        hidden1 = self.hidden1(inputs_B)
+        hidden2 = self.hidden2(hidden1)
+        concat = layers.concatenate([inputs_A, hidden2])
+        main_out = self.main_out(concat)
+        aux_out = self.aux_out(hidden2)
+        return main_out, aux_out
+
+def housing_data_train():
+    housing = fetch_california_housing()
+    X_train_full,  X_test, Y_train_full, Y_test = train_test_split(housing.data, housing.target)
+    X_train, X_valid, Y_train, Y_valid = train_test_split(X_train_full, Y_train_full)
+    # 仅做伸缩变化
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
+    X_valid = scaler.transform(X_valid)
+    X_new = X_test[:3]
+    print(X_train.shape)
+
+    # 构建多路输入
+    X_train_A, X_train_B = X_train[:, :5], X_train[:, 2:]
+    X_valid_A, X_valid_B = X_valid[:, :5], X_valid[:, 2:]
+    X_test_A, X_test_B = X_test[:, :5], X_test[:, 2:]
+    X_new_A, X_new_B = X_new[:, :5], X_new[:, 2:]
+    # 建模
+    # 1: 顺序建模
+    # model = keras.models.Sequential([
+    #     layers.Dense(30, activation='relu', input_shape=X_train.shape[1:]), #
+    #     layers.Dense(1)
+    # ])
+
+    # 2：拓扑结构1 函数式编程
+    # input_ = layers.Input(shape=X_train.shape[1:])
+    # dense1 = layers.Dense(30, activation='relu')(input_)
+    # dense2 = layers.Dense(30, activation='relu')(dense1)
+    # concat = layers.Concatenate()([input_, dense2])
+    # output = layers.Dense(1)(concat)
+    # model = keras.Model(inputs=[input_], outputs=[output])
+    # print(model.summary())
+
+    # 3：拓扑结构2 函数式编程 多路输入
+    # inputA = layers.Input(shape=[5], name='wide_input')
+    # inputB = layers.Input(shape=[6], name='deep_input')
+    # dense1 = layers.Dense(30, activation='relu')(inputB)
+    # dense2 = layers.Dense(30, activation='relu')(dense1)
+    # concat = layers.Concatenate()([inputA, dense2])
+    # output = layers.Dense(1)(concat)
+    # model = keras.Model(inputs=[inputA, inputB], outputs=[output])
+    # print(model.summary())
+
+    # 4：拓扑结构3 函数式编程 多路输入，多路输出
+    inputA = layers.Input(shape=[5], name='wide_input')
+    inputB = layers.Input(shape=[6], name='deep_input')
+    dense1 = layers.Dense(30, activation='relu')(inputB)
+    dense2 = layers.Dense(30, activation='relu')(dense1)
+    concat = layers.Concatenate()([inputA, dense2])
+    output = layers.Dense(1)(concat)
+    aux_output = layers.Dense(1)(dense2)
+    model = keras.Model(inputs=[inputA, inputB], outputs=[output, aux_output])
+    print(model.summary())
+
+    # 5：拓扑结构4 命令式编程，子类化 多路输入，多路输出
+    # inputA = layers.Input(shape=[5], name='wide_input')
+    # inputB = layers.Input(shape=[6], name='deep_input')
+    # output, aux_output = WideAndDeepModel()([inputA, inputB])
+    # model = keras.Model(inputs=[inputA, inputB], outputs=[output, aux_output])
+    # print(model.summary())
+
+    # 编译
+    model.compile(loss=['mean_squared_error', 'mean_squared_error'],
+                  loss_weights=[0.9, 0.1],
+                  optimizer='sgd')
+    # 回调函数设置
+    model_file = "%s/housing_wide_deep_model.h5"%base_path
+    checkpoint_cb = callbacks.ModelCheckpoint(model_file, save_best_only=True)
+    early_stop_cb = callbacks.EarlyStopping(patience=10, restore_best_weights=True)
+
+    # 训练
+    histroy = model.fit([X_train_A, X_train_B], [Y_train, Y_train],
+                        epochs=20,
+                        validation_data=((X_valid_A, X_valid_B), [Y_valid, Y_valid]),
+                        callbacks=[checkpoint_cb, early_stop_cb])
+
+    # 评估
+    eval = model.evaluate((X_test_A, X_test_B), [Y_test, Y_test])
+    print("eval:", eval)
+
+    # 单独预测
+    y_pred, y_pred_aux = model.predict((X_new_A, X_new_B))
+    print("y_true:", Y_test[:3])
+    print("y_pred:", y_pred)
+
+    # # 保存模型
+    # model.save("%s/housing_wide_deep_model.h5"%base_path)
+    # # 加载模型
+    # model_new = keras.models.load_model("%s/housing_wide_deep_model.h5"%base_path)
+    # eval = model_new.evaluate((X_test_A, X_test_B), [Y_test, Y_test])
+    # print("new eval:", eval)
 
 
-create_model()
+
+housing_data_train()
+
 

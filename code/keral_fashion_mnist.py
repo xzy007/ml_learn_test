@@ -7,8 +7,14 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from tensorflow.python.util import compat
 import os
-from tensorflow.python.keras import *
 from tensorflow.python import keras
+from tensorflow.python.keras import layers
+from tensorflow.python.keras import losses
+from tensorflow.python.keras import optimizers
+from tensorflow.python.keras import metrics
+from tensorflow.python.keras import utils
+from tensorflow.python.keras import backend as K
+from tensorflow.python.keras import callbacks
 # keras一般通过tensorflow.keras来使用，但是pycharm没有提示，原因是因为实际的keras路径放在tensorflow/python/keras
 # try:
 #     from tensorflow.python import keras
@@ -110,7 +116,7 @@ def create_model():
     # plt.show()
     # exit(0)
 
-    model = models.Sequential([
+    model = keras.models.Sequential([
         layers.Flatten(input_shape=[28, 28]),
         layers.Dense(300, activation='relu'),
         layers.Dense(100, activation='relu'),
@@ -209,7 +215,7 @@ def create_model_v1():
     eval = model2.evaluate(X_test, Y_test, batch_size=32)
     print(eval)
 
-class WideAndDeepModel(Model):
+class WideAndDeepModel(keras.Model):
     def __init__(self, units=30, activation='relu', **kwargs):
         super().__init__(**kwargs)
         self.hidden1 = layers.Dense(units, activation=activation)
@@ -224,6 +230,16 @@ class WideAndDeepModel(Model):
         main_out = self.main_out(concat)
         aux_out = self.aux_out(hidden2)
         return main_out, aux_out
+
+def build_housing_model(n_hidden=1, n_neurons=30, learning_rate=3e-3, input_shape=[8]):
+    model = keras.models.Sequential()
+    model.add(layers.InputLayer(input_shape=input_shape))
+    for _ in range(n_hidden):
+        model.add(layers.Dense(n_neurons, activation='relu'))
+    model.add(layers.Dense(1))
+    model.compile(loss='mse', optimizer=optimizers.gradient_descent_v2.SGD(learning_rate=learning_rate))
+
+
 
 def housing_data_train():
     housing = fetch_california_housing()
@@ -244,10 +260,10 @@ def housing_data_train():
     X_new_A, X_new_B = X_new[:, :5], X_new[:, 2:]
     # 建模
     # 1: 顺序建模
-    # model = keras.models.Sequential([
-    #     layers.Dense(30, activation='relu', input_shape=X_train.shape[1:]), #
-    #     layers.Dense(1)
-    # ])
+    model = keras.models.Sequential([
+        layers.Dense(30, activation='relu', input_shape=X_train.shape[1:]), #
+        layers.Dense(1)
+    ])
 
     # 2：拓扑结构1 函数式编程
     # input_ = layers.Input(shape=X_train.shape[1:])
@@ -256,7 +272,6 @@ def housing_data_train():
     # concat = layers.Concatenate()([input_, dense2])
     # output = layers.Dense(1)(concat)
     # model = keras.Model(inputs=[input_], outputs=[output])
-    # print(model.summary())
 
     # 3：拓扑结构2 函数式编程 多路输入
     # inputA = layers.Input(shape=[5], name='wide_input')
@@ -266,25 +281,24 @@ def housing_data_train():
     # concat = layers.Concatenate()([inputA, dense2])
     # output = layers.Dense(1)(concat)
     # model = keras.Model(inputs=[inputA, inputB], outputs=[output])
-    # print(model.summary())
 
     # 4：拓扑结构3 函数式编程 多路输入，多路输出
-    inputA = layers.Input(shape=[5], name='wide_input')
-    inputB = layers.Input(shape=[6], name='deep_input')
-    dense1 = layers.Dense(30, activation='relu')(inputB)
-    dense2 = layers.Dense(30, activation='relu')(dense1)
-    concat = layers.Concatenate()([inputA, dense2])
-    output = layers.Dense(1)(concat)
-    aux_output = layers.Dense(1)(dense2)
-    model = keras.Model(inputs=[inputA, inputB], outputs=[output, aux_output])
-    print(model.summary())
+    # inputA = layers.Input(shape=[5], name='wide_input')
+    # inputB = layers.Input(shape=[6], name='deep_input')
+    # dense1 = layers.Dense(30, activation='relu')(inputB)
+    # dense2 = layers.Dense(30, activation='relu')(dense1)
+    # concat = layers.Concatenate()([inputA, dense2])
+    # output = layers.Dense(1)(concat)
+    # aux_output = layers.Dense(1)(dense2)
+    # model = keras.Model(inputs=[inputA, inputB], outputs=[output, aux_output])
 
     # 5：拓扑结构4 命令式编程，子类化 多路输入，多路输出
     # inputA = layers.Input(shape=[5], name='wide_input')
     # inputB = layers.Input(shape=[6], name='deep_input')
     # output, aux_output = WideAndDeepModel()([inputA, inputB])
     # model = keras.Model(inputs=[inputA, inputB], outputs=[output, aux_output])
-    # print(model.summary())
+
+    print(model.summary())
 
     # 编译
     model.compile(loss=['mean_squared_error', 'mean_squared_error'],
@@ -319,6 +333,6 @@ def housing_data_train():
 
 
 
-housing_data_train()
+build_housing_model()
 
 

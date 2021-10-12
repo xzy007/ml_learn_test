@@ -2,6 +2,7 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+import time
 from sklearn.datasets import fetch_california_housing
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -239,8 +240,6 @@ def build_housing_model(n_hidden=1, n_neurons=30, learning_rate=3e-3, input_shap
     model.add(layers.Dense(1))
     model.compile(loss='mse', optimizer=optimizers.gradient_descent_v2.SGD(learning_rate=learning_rate))
 
-
-
 def housing_data_train():
     housing = fetch_california_housing()
     X_train_full,  X_test, Y_train_full, Y_test = train_test_split(housing.data, housing.target)
@@ -260,10 +259,10 @@ def housing_data_train():
     X_new_A, X_new_B = X_new[:, :5], X_new[:, 2:]
     # 建模
     # 1: 顺序建模
-    model = keras.models.Sequential([
-        layers.Dense(30, activation='relu', input_shape=X_train.shape[1:]), #
-        layers.Dense(1)
-    ])
+    # model = keras.models.Sequential([
+    #     layers.Dense(30, activation='relu', input_shape=X_train.shape[1:]), #
+    #     layers.Dense(1)
+    # ])
 
     # 2：拓扑结构1 函数式编程
     # input_ = layers.Input(shape=X_train.shape[1:])
@@ -283,14 +282,18 @@ def housing_data_train():
     # model = keras.Model(inputs=[inputA, inputB], outputs=[output])
 
     # 4：拓扑结构3 函数式编程 多路输入，多路输出
-    # inputA = layers.Input(shape=[5], name='wide_input')
-    # inputB = layers.Input(shape=[6], name='deep_input')
-    # dense1 = layers.Dense(30, activation='relu')(inputB)
-    # dense2 = layers.Dense(30, activation='relu')(dense1)
-    # concat = layers.Concatenate()([inputA, dense2])
-    # output = layers.Dense(1)(concat)
-    # aux_output = layers.Dense(1)(dense2)
-    # model = keras.Model(inputs=[inputA, inputB], outputs=[output, aux_output])
+    inputA = layers.Input(shape=[5], name='wide_input')
+    inputB = layers.Input(shape=[6], name='deep_input')
+    dense1 = layers.Dense(30, activation='relu')(inputB)
+    dense2 = layers.Dense(30, activation='relu')(dense1)
+    concat = layers.Concatenate()([inputA, dense2])
+    output = layers.Dense(1)(concat)
+    def my_summary(x):
+        tf.summary.histogram('main_out', x)
+        return x
+    output = tf.keras.layers.Lambda(my_summary)(output)
+    aux_output = layers.Dense(1)(dense2)
+    model = keras.Model(inputs=[inputA, inputB], outputs=[output, aux_output])
 
     # 5：拓扑结构4 命令式编程，子类化 多路输入，多路输出
     # inputA = layers.Input(shape=[5], name='wide_input')
@@ -306,14 +309,16 @@ def housing_data_train():
                   optimizer='sgd')
     # 回调函数设置
     model_file = "%s/housing_wide_deep_model.h5"%base_path
+    run_logdir = "%s/my_logs/%s"%(base_path, time.strftime("run_%Y_%m_%d_%H_%M_%S"))
     checkpoint_cb = callbacks.ModelCheckpoint(model_file, save_best_only=True)
     early_stop_cb = callbacks.EarlyStopping(patience=10, restore_best_weights=True)
+    tensorboard_cb = callbacks.TensorBoard(run_logdir, histogram_freq=1, write_grads=True)
 
     # 训练
     histroy = model.fit([X_train_A, X_train_B], [Y_train, Y_train],
-                        epochs=20,
+                        epochs=30,
                         validation_data=((X_valid_A, X_valid_B), [Y_valid, Y_valid]),
-                        callbacks=[checkpoint_cb, early_stop_cb])
+                        callbacks=[checkpoint_cb, early_stop_cb, tensorboard_cb])
 
     # 评估
     eval = model.evaluate((X_test_A, X_test_B), [Y_test, Y_test])
@@ -324,15 +329,15 @@ def housing_data_train():
     print("y_true:", Y_test[:3])
     print("y_pred:", y_pred)
 
-    # # 保存模型
-    # model.save("%s/housing_wide_deep_model.h5"%base_path)
-    # # 加载模型
-    # model_new = keras.models.load_model("%s/housing_wide_deep_model.h5"%base_path)
-    # eval = model_new.evaluate((X_test_A, X_test_B), [Y_test, Y_test])
-    # print("new eval:", eval)
+    # 保存模型
+    model.save("%s/housing_wide_deep_model.h5"%base_path)
+    # 加载模型
+    model_new = keras.models.load_model("%s/housing_wide_deep_model.h5"%base_path)
+    eval = model_new.evaluate((X_test_A, X_test_B), [Y_test, Y_test])
+    print("new eval:", eval)
 
 
 
-build_housing_model()
+housing_data_train()
 
 
